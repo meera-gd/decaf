@@ -50,7 +50,7 @@ class Compiler {
             parseOptions(args);
 
             String sourceText = new String(Files.readAllBytes(Paths.get(sourceFile)), StandardCharsets.UTF_8);
-            List<Token> tokens = new LexicalAnalyzer(sourceText).analyze();
+            List<Token> tokens = new LexicalAnalyzer(sourceText, sourceFile).analyze();
 
             switch (target) {
                 case "scan":
