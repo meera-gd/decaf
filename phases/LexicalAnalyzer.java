@@ -68,7 +68,7 @@ public class LexicalAnalyzer {
                     advanceLookahead(1);
                 } else if (sourceText.startsWith("\\", lookahead)) {
                     advanceLookahead(1);
-                    if (sourceText.length() > lookahead && isUnescapedCharacterInStringOrCharacterLiteral(sourceText.charAt(lookahead))) {
+                    if (sourceText.length() > lookahead && isEscapedCharacterInStringOrCharacterLiteral(sourceText.charAt(lookahead))) {
                         advanceLookahead(1);
                     }
                     else {
