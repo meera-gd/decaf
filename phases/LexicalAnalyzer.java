@@ -140,6 +140,21 @@ public class LexicalAnalyzer {
                     readToken(TokenType.IDENTIFIER);
                 }
 
+            // INTEGER LITERALS
+            } else if (lookaheadStartsWith(isDecimalDigit)) {
+                if (lookaheadStartsWith("0x")) {
+                    advanceLookahead(2);
+                    while (lookaheadStartsWith(isHexDigit)) {
+                        advanceLookahead(1);
+                    }
+                    readToken(TokenType.INTLITERAL);
+                } else {
+                    while (lookaheadStartsWith(isDecimalDigit)) {
+                        advanceLookahead(1);
+                    }
+                    readToken(TokenType.INTLITERAL);
+                }
+
             // CHARACTER LITERALS
             } else if (lookaheadStartsWith("'")) {
                 advanceLookahead(1);
