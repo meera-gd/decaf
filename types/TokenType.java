@@ -4,5 +4,6 @@ public enum TokenType {
     BOOLEANLITERAL,
     CHARLITERAL,
     IDENTIFIER,
-    KEYWORD;
+    INTLITERAL,
+    STRINGLITERAL;
 }

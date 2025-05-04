@@ -3,6 +3,7 @@ package decaf.compiler.phases;
 import decaf.compiler.types.Token;
 import decaf.compiler.types.TokenType;
 
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
@@ -17,37 +18,72 @@ public class LexicalAnalyzer {
     private int lineNumber = 1;
     private int lookaheadLineCount = 0;
 
+    private static record FixedLengthPredicate (Predicate<String> function, int length) {
+    }
+
+    private static final List<String> booleanLiterals = Arrays.asList("true", "false");
+    private static final List<String> keywords = Arrays.asList(
+        "boolean", "break", "callout", "class", "continue",
+        "else", "for", "if", "int", "return", "void"
+    );
+    private static final List<String> oneCharacterOperators = Arrays.asList("+", "-", "*", "/", "%", "<", ">", "!", "=");
+    private static final List<String> twoCharacterOperators = Arrays.asList("==", "!=", "<=", ">=", "&&", "||", "+=", "-=");
+
+    private static final FixedLengthPredicate isNonCommentWhiteSpaceCharacter = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    }, 1);
+
+    private static final FixedLengthPredicate isDecimalDigit = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return '0' <= c && c <= '9';
+    }, 1);
+
+    private static final FixedLengthPredicate isHexDigit = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return isDecimalDigit.function().test(s) || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f');
+    }, 1);
+
+    private static final FixedLengthPredicate isUnescapedCharacterInStringOrCharacterLiteral = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return ' ' <= c && c <= '~' && c != '"' && c != '\'' && c != '\\';
+    }, 1);
+
+    private static final FixedLengthPredicate isEscapedCharacterInStringOrCharacterLiteral = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return c == '"' || c == '\'' || c == '\\' || c == 't' || c == 'n';
+    }, 1);
+
+    private static final FixedLengthPredicate isCharacterAtStartOfKeywordOrIdentifier = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
+    }, 1);
+
+    private static final FixedLengthPredicate isCharacterInsideKeywordOrIdentifier = new FixedLengthPredicate(s -> {
+        char c = s.charAt(0);
+        return isCharacterAtStartOfKeywordOrIdentifier.function().test(s) || isDecimalDigit.function().test(s);
+    }, 1);
+
+    private static final FixedLengthPredicate isOneCharacterOperator = new FixedLengthPredicate(s -> {
+        return oneCharacterOperators.contains(s);
+    }, 1);
+
+    private static final FixedLengthPredicate isTwoCharacterOperator = new FixedLengthPredicate(s -> {
+        return twoCharacterOperators.contains(s);
+    }, 2);
+
     public LexicalAnalyzer(String sourceText, String sourceFile) {
         this.sourceText = sourceText;
         this.sourceFile = sourceFile;
     }
 
-    private static boolean isUnescapedCharacterInStringOrCharacterLiteral(char c) {
-        return ' ' <= c && c <= '~' && c != '"' && c != '\'' && c != '\\';
-    }
-
-    private static boolean isEscapedCharacterInStringOrCharacterLiteral(char c) {
-        return c == '"' || c == '\'' || c == '\\' || c == 't' || c == 'n';
-    }
-
-    private static boolean isCharacterAtStartOfKeywordOrIdentifier(char c) {
-        return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
-    }
-
-    private static boolean isCharacterInsideKeywordOrIdentifier(char c) {
-        return isCharacterAtStartOfKeywordOrIdentifier(c) || ('0' <= c && c <= '9');
-    }
-
-    private static boolean isNonCommentWhiteSpaceCharacter(char c) {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-    }
-
-    private boolean lookaheadStartsWithString(String s) {
+    private boolean lookaheadStartsWith(String s) {
         return sourceText.startsWith(s, lookahead);
     }
 
-    private boolean lookaheadStartsWithCharacterInClass(Predicate<Character> isInClass) {
-        return sourceText.length() > lookahead && isInClass.test(sourceText.charAt(lookahead));
+    private boolean lookaheadStartsWith(FixedLengthPredicate pred) {
+        return sourceText.length() >= lookahead + pred.length()
+            && pred.function().test(sourceText.substring(lookahead, lookahead + pred.length()));
     }
 
     private void advanceCurrentPosition() {
@@ -78,10 +114,10 @@ public class LexicalAnalyzer {
         while (currentPosition < sourceText.length()) { // TODO replace
 
             // WHITESPACE and COMMENTS
-            if (lookaheadStartsWithCharacterInClass(LexicalAnalyzer::isNonCommentWhiteSpaceCharacter)) {
+            if (lookaheadStartsWith(isNonCommentWhiteSpaceCharacter)) {
                 advanceLookahead(1);
                 advanceCurrentPosition();
-            } else if (lookaheadStartsWithString("//")) {
+            } else if (lookaheadStartsWith("//")) {
                 int commentLength = sourceText.indexOf("\n", lookahead) - lookahead;
                 if (commentLength < 2) {
                     commentLength = sourceText.length() - lookahead;
@@ -90,31 +126,28 @@ public class LexicalAnalyzer {
                 advanceCurrentPosition();
 
             // IDENTIFIERS and BOOLEAN LITERALS and KEYWORDS
-            } else if (lookaheadStartsWithCharacterInClass(LexicalAnalyzer::isCharacterAtStartOfKeywordOrIdentifier)) {
+            } else if (lookaheadStartsWith(isCharacterAtStartOfKeywordOrIdentifier)) {
+                advanceLookahead(1);
+                while (lookaheadStartsWith(isCharacterInsideKeywordOrIdentifier)) {
                     advanceLookahead(1);
-                    while (lookaheadStartsWithCharacterInClass(LexicalAnalyzer::isCharacterInsideKeywordOrIdentifier)) {
-                        advanceLookahead(1);
-                    }
-                    String tokenString = sourceText.substring(currentPosition, lookahead);
-                    if(tokenString.equals("true") || tokenString.equals("false")) {
-                        readToken(TokenType.BOOLEANLITERAL);
-                    } else if (tokenString.equals("boolean") || tokenString.equals("break") || tokenString.equals("callout") ||
-                        tokenString.equals("class") || tokenString.equals("continue") || tokenString.equals("else") ||
-                        tokenString.equals("for") || tokenString.equals("if") || tokenString.equals("int") ||
-                        tokenString.equals("return") || tokenString.equals("void")) {
-                        readToken(null);
-                    } else {
-                        readToken(TokenType.IDENTIFIER);
-                    }
+                }
+                String tokenString = sourceText.substring(currentPosition, lookahead);
+                if(booleanLiterals.contains(tokenString)) {
+                    readToken(TokenType.BOOLEANLITERAL);
+                } else if (keywords.contains(tokenString)) {
+                    readToken(null);
+                } else {
+                    readToken(TokenType.IDENTIFIER);
+                }
 
             // CHARACTER LITERALS
-            } else if (lookaheadStartsWithString("'")) {
+            } else if (lookaheadStartsWith("'")) {
                 advanceLookahead(1);
-                if (lookaheadStartsWithCharacterInClass(LexicalAnalyzer::isUnescapedCharacterInStringOrCharacterLiteral)) {
+                if (lookaheadStartsWith(isUnescapedCharacterInStringOrCharacterLiteral)) {
                     advanceLookahead(1);
-                } else if (lookaheadStartsWithString("\\")) {
+                } else if (lookaheadStartsWith("\\")) {
                     advanceLookahead(1);
-                    if (lookaheadStartsWithCharacterInClass(LexicalAnalyzer::isEscapedCharacterInStringOrCharacterLiteral)) {
+                    if (lookaheadStartsWith(isEscapedCharacterInStringOrCharacterLiteral)) {
                         advanceLookahead(1);
                     }
                     else {
@@ -123,12 +156,41 @@ public class LexicalAnalyzer {
                 } else {
                     abort();
                 }
-                if (lookaheadStartsWithString("'")) {
+                if (lookaheadStartsWith("'")) {
                     advanceLookahead(1);
                     readToken(TokenType.CHARLITERAL);
                 } else {
                     abort();
                 }
+
+            // STRING LITERALS
+            } else if (lookaheadStartsWith("\"")) {
+                advanceLookahead(1);
+                while (!lookaheadStartsWith("\"")) {
+                    if (lookaheadStartsWith(isUnescapedCharacterInStringOrCharacterLiteral)) {
+                        advanceLookahead(1);
+                    } else if (lookaheadStartsWith("\\")) {
+                        advanceLookahead(1);
+                        if (lookaheadStartsWith(isEscapedCharacterInStringOrCharacterLiteral)) {
+                            advanceLookahead(1);
+                        }
+                        else {
+                            abort();
+                        }
+                    } else {
+                        abort();
+                    }
+                }
+                advanceLookahead(1);
+                readToken(TokenType.STRINGLITERAL);
+
+            // OPERATORS
+            } else if (lookaheadStartsWith(isTwoCharacterOperator)) {
+                advanceLookahead(2);
+                readToken(null);
+            } else if (lookaheadStartsWith(isOneCharacterOperator)) {
+                advanceLookahead(1);
+                readToken(null);
 
             } else {
                 abort();
