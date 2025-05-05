@@ -2,7 +2,7 @@ package decaf.compiler.phases;
 
 import decaf.compiler.types.ErrorToken;
 import decaf.compiler.types.Token;
-import decaf.compiler.types.TokenOrError;
+import decaf.compiler.types.TokenOrErrorToken;
 import decaf.compiler.types.TokenType;
 
 import java.util.Arrays;
@@ -14,7 +14,7 @@ public class LexicalAnalyzer {
 
     private final String sourceText;
     private final String sourceFile;
-    private final List<TokenOrError> tokens = new ArrayList<>();
+    private final List<TokenOrErrorToken> tokens = new ArrayList<>();
     private int currentPosition = 0;
     private int lookahead = 0;
     private int lineNumber = 1;
@@ -109,13 +109,15 @@ public class LexicalAnalyzer {
     }
 
     private void readErrorToken(String expectation) {
-        advanceCurrentPosition();
+        if (currentPosition < lookahead) {
+            advanceCurrentPosition();
+        }
         advanceLookahead(1);
         tokens.add(new ErrorToken(sourceFile, lineNumber, characterNumber, expectation, sourceText.charAt(currentPosition)));
         advanceCurrentPosition();
     }
 
-    public List<TokenOrError> analyze() {
+    public List<TokenOrErrorToken> analyze() {
         while (currentPosition < sourceText.length()) {
 
             // WHITESPACE and COMMENTS
@@ -149,10 +151,14 @@ public class LexicalAnalyzer {
             } else if (lookaheadStartsWith(isDecimalDigit)) {
                 if (lookaheadStartsWith("0x")) {
                     advanceLookahead(2);
-                    while (lookaheadStartsWith(isHexDigit)) {
-                        advanceLookahead(1);
+                    if (lookaheadStartsWith(isHexDigit)) {
+                        while (lookaheadStartsWith(isHexDigit)) {
+                            advanceLookahead(1);
+                        }
+                        readToken(TokenType.INTLITERAL);
+                    } else {
+                        readErrorToken(null);
                     }
-                    readToken(TokenType.INTLITERAL);
                 } else {
                     while (lookaheadStartsWith(isDecimalDigit)) {
                         advanceLookahead(1);
@@ -198,16 +204,19 @@ public class LexicalAnalyzer {
                         advanceLookahead(1);
                         if (lookaheadStartsWith(isEscapedCharacterInStringOrCharacterLiteral)) {
                             advanceLookahead(1);
-                        }
-                        else {
+                        } else {
                             readErrorToken(null);
+                            break;
                         }
                     } else {
                         readErrorToken("\"");
+                        break;
                     }
                 }
-                advanceLookahead(1);
-                readToken(TokenType.STRINGLITERAL);
+                if (lookaheadStartsWith("\"")) {
+                    advanceLookahead(1);
+                    readToken(TokenType.STRINGLITERAL);
+                }
 
             // OPERATORS
             } else if (lookaheadStartsWith(isTwoCharacterOperator)) {
