@@ -32,7 +32,7 @@ public class LexicalAnalyzer {
     private static final List<String> punctuationCharacters = Arrays.asList("(", ")", "{", "}", "[", "]", ",", ";");
 
     private static final FixedLengthPredicate isNonCommentWhiteSpaceCharacter = new FixedLengthPredicate(s -> {
-        return s.equals(" ") || s.equals("\t") || s.equals("\n") || s.equals("\r") || s.equals("\f");
+        return s.equals(" ") || s.equals("\t") || s.equals("\n") || s.equals("\r");
     }, 1);
 
     private static final FixedLengthPredicate isDecimalDigit = new FixedLengthPredicate(s -> {
@@ -90,9 +90,17 @@ public class LexicalAnalyzer {
     }
 
     private void advanceCurrentPosition() {
-        if (sourceText.charAt(currentPosition) == '\n') {
+        advanceCurrentPosition(false);
+    }
+
+    private void advanceCurrentPosition(boolean isDuringError) {
+        if (!isDuringError && sourceText.charAt(currentPosition) == '\n') {
             lineNumber += 1;
             characterNumber = 1;
+        } else if (sourceText.charAt(currentPosition) == '\t') {
+            characterNumber += 7;
+        } else if (sourceText.charAt(currentPosition) == '\f') {
+            characterNumber += 2;
         } else {
             characterNumber += lookahead - currentPosition;
         }
@@ -110,11 +118,11 @@ public class LexicalAnalyzer {
 
     private void readErrorToken(String expectation) {
         if (currentPosition < lookahead) {
-            advanceCurrentPosition();
+            advanceCurrentPosition(true);
         }
         advanceLookahead(1);
         tokens.add(new ErrorToken(sourceFile, lineNumber, characterNumber, expectation, sourceText.charAt(currentPosition)));
-        advanceCurrentPosition();
+        advanceCurrentPosition(true);
     }
 
     public List<TokenOrErrorToken> analyze() {
