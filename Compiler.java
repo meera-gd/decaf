@@ -1,10 +1,11 @@
 package decaf.compiler;
 
 import decaf.compiler.phases.LexicalAnalyzer;
-import decaf.compiler.types.Token;
+import decaf.compiler.types.TokenOrError;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
@@ -49,14 +50,15 @@ class Compiler {
         try {
             parseOptions(args);
 
-            String sourceText = new String(Files.readAllBytes(Paths.get(sourceFile)), StandardCharsets.UTF_8);
-            List<Token> tokens = new LexicalAnalyzer(sourceText, sourceFile).analyze();
+            Path sourcePath = Paths.get(sourceFile);
+            String sourceText = new String(Files.readAllBytes(sourcePath), StandardCharsets.UTF_8);
+            List<TokenOrError> tokens = new LexicalAnalyzer(sourceText, sourcePath.getFileName().toString()).analyze();
 
             switch (target) {
                 case "scan":
                     Files.write(
                         Paths.get(outputFile),
-                        tokens.stream().map(Token::toString).toList()
+                        tokens.stream().map(TokenOrError::toString).toList()
                     );
                     break;
                 default:

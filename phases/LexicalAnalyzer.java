@@ -1,6 +1,8 @@
 package decaf.compiler.phases;
 
+import decaf.compiler.types.ErrorToken;
 import decaf.compiler.types.Token;
+import decaf.compiler.types.TokenOrError;
 import decaf.compiler.types.TokenType;
 
 import java.util.Arrays;
@@ -12,26 +14,25 @@ public class LexicalAnalyzer {
 
     private final String sourceText;
     private final String sourceFile;
-    private final List<Token> tokens = new ArrayList<>();
+    private final List<TokenOrError> tokens = new ArrayList<>();
     private int currentPosition = 0;
     private int lookahead = 0;
     private int lineNumber = 1;
-    private int lookaheadLineCount = 0;
+    private int characterNumber = 1;
 
     private static record FixedLengthPredicate (Predicate<String> function, int length) {
     }
 
-    private static final List<String> booleanLiterals = Arrays.asList("true", "false");
     private static final List<String> keywords = Arrays.asList(
         "boolean", "break", "callout", "class", "continue",
         "else", "for", "if", "int", "return", "void"
     );
     private static final List<String> oneCharacterOperators = Arrays.asList("+", "-", "*", "/", "%", "<", ">", "!", "=");
     private static final List<String> twoCharacterOperators = Arrays.asList("==", "!=", "<=", ">=", "&&", "||", "+=", "-=");
+    private static final List<String> punctuationCharacters = Arrays.asList("(", ")", "{", "}", "[", "]", ",", ";");
 
     private static final FixedLengthPredicate isNonCommentWhiteSpaceCharacter = new FixedLengthPredicate(s -> {
-        char c = s.charAt(0);
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+        return s.equals(" ") || s.equals("\t") || s.equals("\n") || s.equals("\r") || s.equals("\f");
     }, 1);
 
     private static final FixedLengthPredicate isDecimalDigit = new FixedLengthPredicate(s -> {
@@ -50,8 +51,7 @@ public class LexicalAnalyzer {
     }, 1);
 
     private static final FixedLengthPredicate isEscapedCharacterInStringOrCharacterLiteral = new FixedLengthPredicate(s -> {
-        char c = s.charAt(0);
-        return c == '"' || c == '\'' || c == '\\' || c == 't' || c == 'n';
+        return s.equals("\"") || s.equals("'") || s.equals("\\") || s.equals("t") || s.equals("n");
     }, 1);
 
     private static final FixedLengthPredicate isCharacterAtStartOfKeywordOrIdentifier = new FixedLengthPredicate(s -> {
@@ -60,7 +60,6 @@ public class LexicalAnalyzer {
     }, 1);
 
     private static final FixedLengthPredicate isCharacterInsideKeywordOrIdentifier = new FixedLengthPredicate(s -> {
-        char c = s.charAt(0);
         return isCharacterAtStartOfKeywordOrIdentifier.function().test(s) || isDecimalDigit.function().test(s);
     }, 1);
 
@@ -71,6 +70,10 @@ public class LexicalAnalyzer {
     private static final FixedLengthPredicate isTwoCharacterOperator = new FixedLengthPredicate(s -> {
         return twoCharacterOperators.contains(s);
     }, 2);
+
+    private static final FixedLengthPredicate isPunctuationCharacter = new FixedLengthPredicate(s -> {
+        return punctuationCharacters.contains(s);
+    }, 1);
 
     public LexicalAnalyzer(String sourceText, String sourceFile) {
         this.sourceText = sourceText;
@@ -87,18 +90,17 @@ public class LexicalAnalyzer {
     }
 
     private void advanceCurrentPosition() {
+        if (sourceText.charAt(currentPosition) == '\n') {
+            lineNumber += 1;
+            characterNumber = 1;
+        } else {
+            characterNumber += lookahead - currentPosition;
+        }
         currentPosition = lookahead;
-        lineNumber = lineNumber + lookaheadLineCount;
-        lookaheadLineCount = 0;
     }
 
     private void advanceLookahead(int n) {
-        for (int i = 0; i < n; i++) {
-            lookahead += 1;
-            if (sourceText.startsWith("\n", lookahead)) {
-                lookaheadLineCount += 1;
-            }
-        }
+        lookahead += n;
     }
 
     private void readToken(TokenType type) {
@@ -106,12 +108,15 @@ public class LexicalAnalyzer {
         advanceCurrentPosition();
     }
 
-    private void abort() {
-        throw new RuntimeException("Unrecognized token on line " + lineNumber);
+    private void readErrorToken(String expectation) {
+        advanceCurrentPosition();
+        advanceLookahead(1);
+        tokens.add(new ErrorToken(sourceFile, lineNumber, characterNumber, expectation, sourceText.charAt(currentPosition)));
+        advanceCurrentPosition();
     }
 
-    public List<Token> analyze() {
-        while (currentPosition < sourceText.length()) { // TODO replace
+    public List<TokenOrError> analyze() {
+        while (currentPosition < sourceText.length()) {
 
             // WHITESPACE and COMMENTS
             if (lookaheadStartsWith(isNonCommentWhiteSpaceCharacter)) {
@@ -132,7 +137,7 @@ public class LexicalAnalyzer {
                     advanceLookahead(1);
                 }
                 String tokenString = sourceText.substring(currentPosition, lookahead);
-                if(booleanLiterals.contains(tokenString)) {
+                if(tokenString.equals("true") || tokenString.equals("false")) {
                     readToken(TokenType.BOOLEANLITERAL);
                 } else if (keywords.contains(tokenString)) {
                     readToken(null);
@@ -160,22 +165,27 @@ public class LexicalAnalyzer {
                 advanceLookahead(1);
                 if (lookaheadStartsWith(isUnescapedCharacterInStringOrCharacterLiteral)) {
                     advanceLookahead(1);
+                    if (lookaheadStartsWith("'")) {
+                        advanceLookahead(1);
+                        readToken(TokenType.CHARLITERAL);
+                    } else {
+                        readErrorToken("'");
+                    }
                 } else if (lookaheadStartsWith("\\")) {
                     advanceLookahead(1);
                     if (lookaheadStartsWith(isEscapedCharacterInStringOrCharacterLiteral)) {
                         advanceLookahead(1);
-                    }
-                    else {
-                        abort();
+                        if (lookaheadStartsWith("'")) {
+                            advanceLookahead(1);
+                            readToken(TokenType.CHARLITERAL);
+                        } else {
+                            readErrorToken("'");
+                        }
+                    } else {
+                        readErrorToken(null);
                     }
                 } else {
-                    abort();
-                }
-                if (lookaheadStartsWith("'")) {
-                    advanceLookahead(1);
-                    readToken(TokenType.CHARLITERAL);
-                } else {
-                    abort();
+                    readErrorToken(null);
                 }
 
             // STRING LITERALS
@@ -190,10 +200,10 @@ public class LexicalAnalyzer {
                             advanceLookahead(1);
                         }
                         else {
-                            abort();
+                            readErrorToken(null);
                         }
                     } else {
-                        abort();
+                        readErrorToken("\"");
                     }
                 }
                 advanceLookahead(1);
@@ -207,8 +217,14 @@ public class LexicalAnalyzer {
                 advanceLookahead(1);
                 readToken(null);
 
+            // PUNCTUATION CHARACTERS
+            } else if (lookaheadStartsWith(isPunctuationCharacter)) {
+                advanceLookahead(1);
+                readToken(null);
+
+            // unrecognized character
             } else {
-                abort();
+                readErrorToken(null);
             }
         }
         return tokens;
